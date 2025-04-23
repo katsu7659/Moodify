@@ -3,8 +3,6 @@ from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 import logging
-import datetime
-import json
 
 # Настройка логирования
 logging.basicConfig(
@@ -31,17 +29,6 @@ class SpotifyManager:
         self.user_history = {}
         self._load_history()
 
-    def _load_history(self):
-        try:
-            with open('user_history.json', 'r') as f:
-                self.user_history = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            self.user_history = {}
-
-    def _save_history(self):
-        with open('user_history.json', 'w') as f:
-            json.dump(self.user_history, f)
-
     def get_auth_url(self):
         return self.sp.auth_manager.get_authorize_url()
 
@@ -66,69 +53,7 @@ class SpotifyManager:
 
         track_uris = [track['uri'] for track in results['tracks']['items']]
         self.sp.playlist_add_items(playlist['id'], track_uris)
-
         return playlist
-
-    def save_user_preference(self, user_id, genre, mood):
-        # Сохранение предпочтений пользователя в историю
-        if not genre or not mood:
-            raise ValueError("Жанр и настроение не могут быть пустыми.")
-        if user_id not in self.user_history:
-            self.user_history[user_id] = []
-        try:
-            self.user_history[user_id].append({'genre': genre,
-            'mood': mood,
-            'timestamp': datetime.datetime.now()})
-        except Exception as e:
-                print(f"Ошибка сохранения предпочтений: {e}")
-                self._save_history()
-
-    def get_user_top_tracks(self, user_id, limit=5):
-        try:
-            top_tracks = self.sp.current_user_top_tracks(limit=limit)
-            return top_tracks['items']
-        except Exception as e:
-            logger.error(f"Ошибка получения топ-треков: {e}")
-            return None
-
-    def _mood_to_valence(self, mood):
-        mood_map = {'Радостное': 0.9,
-            'Грустное': 0.2,
-            'Энергичное': 0.8,
-            'Расслабленное': 0.5,
-            'Любовь': 0.7,
-            'Тревожное': 0.3,
-            'Скука': 0.4}
-        return mood_map.get(mood, 0.5)
-
-    def get_recommendations(self, user_id, limit=7):
-        if user_id not in self.user_history or len(self.user_history[user_id]) < 1:
-            return None  # Недостаточно данных для рекомендаций
-
-            # Анализируем историю
-        genres = {}
-        moods = {}
-        for entry in self.user_history[user_id][-5:]:
-            genres[entry['genre']] = genres.get(entry['genre'], 0) + 1
-            moods[entry['mood']] = moods.get(entry['mood'], 0) + 1
-
-        # Определяем самые популярные жанр и настроение
-        top_genre = max(genres.items(), key=lambda x: x[1])[0]
-        top_mood = max(moods.items(), key=lambda x: x[1])[0]
-
-        # Получаем рекомендации от Spotify
-        try:
-            logger.info(f"Запрос рекомендаций с жанром: {top_genre}, "
-                        f"настроением: {top_mood}")
-            recs = self.sp.recommendations(seed_genres=[top_genre.lower()],
-                limit=limit,
-                target_valence=self._mood_to_valence(top_mood))
-            return recs['tracks']
-        except Exception as e:
-            logger.error(f"Ошибка получения рекомендаций: {e}")
-            logger.info(f"top_genre: {top_genre}, top_mood: {top_mood}")
-            return None
-
 
 class KeyboardManager:
     @staticmethod
@@ -218,42 +143,6 @@ class MusicBot:
                     'используйте команду /create')
             elif call.data == 'help':
                 help(call.message)
-
-        @self.bot.message_handler(commands=['recommend'])
-        def recommend_tracks(message):
-            user_id = message.from_user.id
-            try:
-                # Проверяем авторизацию
-                token_info = self.spotify.sp.auth_manager.get_cached_token()
-                if not token_info:
-                    auth_url = self.spotify.get_auth_url()
-                    self.bot.send_message(message.chat.id,
-                                          "Сначала авторизуйтесь в Spotify: " +
-                                          auth_url)
-                    return
-                # Получаем рекомендации
-                recommendations = self.spotify.get_recommendations(user_id)
-                if not recommendations:
-                    self.bot.send_message(message.chat.id,
-                                          "Пока недостаточно данных для "
-                                          "рекомендаций. "
-                                          "Создайте еще несколько плейлистов!")
-                return
-
-                # Формируем сообщение с рекомендациями
-                msg = "Вам могут понравиться:\n\n"
-                for i, track in enumerate(recommendations, 1):
-                    artists = ", ".join([a['name'] for a in track['artists']])
-                    msg += f"{i}. {track['name']} - {artists}\n"
-                    msg += f"🔗 {track['external_urls']['spotify']}\n\n"
-
-                self.bot.send_message(message.chat.id, msg)
-
-            except Exception as e:
-                logger.error(f"Ошибка рекомендаций: {e}")
-                self.bot.send_message(message.chat.id,
-                                      "Произошла ошибка при получении"
-                                      "рекомендаций")
 
         @self.bot.message_handler(commands=['create'])
         def create_playlist(message):
